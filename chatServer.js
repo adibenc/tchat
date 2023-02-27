@@ -7,8 +7,8 @@
 // ***************************************************************************
 
 var conf = { 
-    port: 8888,
-    debug: false,
+    port: 8889,
+    debug: true,
     dbPort: 6379,
     dbHost: '127.0.0.1',
     dbOptions: {},
@@ -27,6 +27,7 @@ var app = express(),
     server = http.createServer(app);
     server.listen(conf.port);
 
+
 // Express app configuration
 app.configure(function() {
     app.use(express.bodyParser());
@@ -37,13 +38,20 @@ var io = require('socket.io')(server);
 var redis = require('socket.io-redis');
 io.adapter(redis({ host: conf.dbHost, port: conf.dbPort }));
 
-var db = require('redis').createClient(conf.dbPort,conf.dbHost);
+// var db = require('redis').createClient(conf.dbPort,conf.dbHost);
+var db = require('redis').createClient({
+	port: conf.dbPort,
+	host: conf.dbHost
+});
+
+db.connect()
+let mainBuffer = db
 
 // Logger configuration
 var logger = new events.EventEmitter();
 logger.on('newEvent', function(event, data) {
     // Console log
-    console.log('%s: %s', event, JSON.stringify(data));
+    ;
     // Persistent log storage too?
     // TODO
 });
@@ -86,16 +94,29 @@ app.post('/api/broadcast/', requireAuthentication, function(req, res) {
 // Socket.io events
 // ***************************************************************************
 
-io.sockets.on('connection', function(socket) {
+io.sockets.on('connection', async function(socket) {
 
     // Welcome message on connection
     socket.emit('connected', 'Welcome to the chat server');
     logger.emit('newEvent', 'userConnected', {'socket':socket.id});
 
+	console.log([
+		[socket.id, 'connectionDate', new Date()], redis.print
+	])
     // Store user data in db
-    db.hset([socket.id, 'connectionDate', new Date()], redis.print);
-    db.hset([socket.id, 'socketID', socket.id], redis.print);
-    db.hset([socket.id, 'username', 'anonymous'], redis.print);
+    // db.HSET([socket.id, 'connectionDate', new Date()], mainBuffer)
+    
+    db.HSET(socket.id, 'connectionDate', new Date()).catch(()=>{})
+    db.HSET(socket.id, 'socketID', socket.id).catch(()=>{})
+    db.HSET(socket.id, 'username', 'anonymous').catch(()=>{})
+
+	// let x = await db.HGET(socket.id, 'socketID')
+
+	console.log(["x", 
+		// await db.HGET(socket.id).catch(()=>{}),
+		// await db.HGET('socketID').catch(()=>{}),
+		await db.HGET(socket.id, 'socketID'),
+	])
 
     // Join user to 'MainRoom'
     socket.join(conf.mainroom);
@@ -109,7 +130,7 @@ io.sockets.on('connection', function(socket) {
     // User wants to subscribe to [data.rooms]
     socket.on('subscribe', function(data) {
         // Get user info from db
-        db.hget([socket.id, 'username'], function(err, username) {
+        db.HGET(socket.id, 'username').then( function(err, username) {
 
             // Subscribe user to chosen rooms
             _.each(data.rooms, function(room) {
@@ -130,7 +151,7 @@ io.sockets.on('connection', function(socket) {
     // User wants to unsubscribe from [data.rooms]
     socket.on('unsubscribe', function(data) {
         // Get user info from db
-        db.hget([socket.id, 'username'], function(err, username) {
+        db.HGET(socket.id, 'username').then( function(err, username) {
         
             // Unsubscribe user from chosen rooms
             _.each(data.rooms, function(room) {
@@ -159,8 +180,11 @@ io.sockets.on('connection', function(socket) {
     socket.on('getUsersInRoom', function(data) {
         var usersInRoom = [];
         var socketsInRoom = _.keys(io.nsps['/'].adapter.rooms[data.room]);
+
+		
         for (var i=0; i<socketsInRoom.length; i++) {
-            db.hgetall(socketsInRoom[i], function(err, obj) {
+            db.HGETALL(socketsInRoom[i]).then( function(obj, err) {
+				
                 usersInRoom.push({'room':data.room, 'username':obj.username, 'id':obj.socketID});
                 // When we've finished with the last one, notify user
                 if (usersInRoom.length == socketsInRoom.length) {
@@ -173,10 +197,10 @@ io.sockets.on('connection', function(socket) {
     // User wants to change his nickname
     socket.on('setNickname', function(data) {
         // Get user info from db
-        db.hget([socket.id, 'username'], function(err, username) {
-
+        db.HGET({}, socket.id, 'username').then( function(err, username) {
+			
             // Store user data in db
-            db.hset([socket.id, 'username', data.username], redis.print);
+            db.HSET({},socket.id, 'username', data.username).catch(()=>{});
             logger.emit('newEvent', 'userSetsNickname', {'socket':socket.id, 'oldUsername':username, 'newUsername':data.username});
 
             // Notify all users who belong to the same rooms that this one
@@ -191,16 +215,20 @@ io.sockets.on('connection', function(socket) {
 
     // New message sent to group
     socket.on('newMessage', function(data) {
-        db.hgetall(socket.id, function(err, obj) {
-            if (err) return logger.emit('newEvent', 'error', err);
-            // Check if user is subscribed to room before sending his message
-            if (_.contains(_.values(socket.rooms), data.room)) {
-                var message = {'room':data.room, 'username':obj.username, 'msg':data.msg, 'date':new Date()};
-                // Send message to room
-                io.to(data.room).emit('newMessage', message);
-                logger.emit('newEvent', 'newMessage', message);
-            }
-        });
+		
+		db.HGETALL(socket.id,"newMessage").then(function(obj, err) {
+			
+			if (err) return logger.emit('newEvent', 'error', err);
+			// Check if user is subscribed to room before sending his message
+			if (_.contains(_.values(socket.rooms), data.room)) {
+				var message = {'room':data.room, 'username':obj.username, 'msg':data.msg, 'date':new Date()};
+				// Send message to room
+				io.to(data.room).emit('newMessage', message);
+				logger.emit('newEvent', 'newMessage', message);
+			}
+		}).catch(function(a){
+			
+		});
     });
 
     // Clean up on disconnect
@@ -210,7 +238,7 @@ io.sockets.on('connection', function(socket) {
         var rooms = socket.rooms;
         
         // Get user info from db
-        db.hgetall(socket.id, function(err, obj) {
+        db.HGETALL(socket.id).then( function(obj, err) {
             if (err) return logger.emit('newEvent', 'error', err);
             logger.emit('newEvent', 'userDisconnected', {'socket':socket.id, 'username':obj.username});
 

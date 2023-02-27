@@ -4,7 +4,7 @@
 
 (function(){
 
-    var debug = false;
+    var debug = true;
 
     // ***************************************************************************
     // Socket.io events
@@ -125,6 +125,7 @@
     var getTemplate = function(path, callback) {
         var source;
         var template;
+		let res = ""
  
         // Check first if we've the template cached
         if (_.has(templates, path)) {
@@ -138,10 +139,15 @@
                     template = Handlebars.compile(source);
                     // Store compiled template in cache
                     templates[path] = template;
-                    if (callback) callback(template);
+                    if (callback) {
+						res = callback(template)
+						// console.log(["debug", res])
+					}
                 }
             });
         }
+
+		return res
     }
 
     // Add room tab
@@ -181,16 +187,20 @@
     var addMessage = function(msg) {
         getTemplate('js/templates/message.handlebars', function(template) {
             var room_messages = '#room_messages_'+msg.room;
+			let res = template(msg)
             if ($(room_messages).length > 0) {
-              $(room_messages).append(template(msg));
+              $(room_messages).append(res);
             } else {
               var roomInterval = setInterval(function() {
                 if ($(room_messages).length > 0) {
-                  $(room_messages).append(template(msg));
+                  $(room_messages).append(res);
                   clearInterval(roomInterval);
                 }
               }, 100);
             }
+			// console.log(res)
+
+			return res
         });
     };
 
@@ -203,6 +213,9 @@
             if (!($(user_badge).length)) {
                 $(room_users).append(template(user));
             }
+			let res = template(user)
+
+			return res
         });
     }
 
@@ -262,7 +275,9 @@
     $('#b_send_message').click(function(eventObject) {
         eventObject.preventDefault();
         if ($('#message_text').val() != "") {
-            socket.emit('newMessage', {'room':getCurrentRoom(), 'msg':getMessageText()});
+			let msg = getMessageText()
+			// console.log(msg)
+            socket.emit('newMessage', {'room':getCurrentRoom(), 'msg':msg});
         }
     });
 

@@ -7,6 +7,15 @@ Built with:
 
 This is just a <strong>proof of concept</strong> of what could be done with these technologies.
 
+### Run
+```bash
+# run redis with docker
+docker run --name redis1 -d redis 6379:6379
+
+# run
+node chatServer.js
+```
+
 ### Requires
 
   - Node.js
